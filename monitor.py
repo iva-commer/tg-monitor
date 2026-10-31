@@ -24,7 +24,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient, Button, events
 from telethon.tl.types import User
-from telethon.tl.functions.channels import GetForumTopicsRequest
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -106,28 +105,25 @@ def pos_hash(keywords: list) -> str:
 
 
 async def detect_topics(client, group_id: int) -> dict:
+    topics = {}
     try:
-        entity = await client.get_entity(group_id)
-        result = await client(GetForumTopicsRequest(
-            channel=entity,
-            offset_date=None,
-            offset_id=0,
-            offset_topic=0,
-            limit=100,
-        ))
-        topics = {}
-        for t in result.topics:
-            name = t.title.lower().strip()
+        async for msg in client.iter_messages(group_id, limit=300):
+            if not hasattr(msg, "action") or not msg.action:
+                continue
+            action_name = type(msg.action).__name__
+            if "TopicCreate" not in action_name:
+                continue
+            title = getattr(msg.action, "title", "")
+            name = title.lower().strip()
             if "запрос" in name:
-                topics["requests"] = t.id
+                topics["requests"] = msg.id
             elif "канал" in name:
-                topics["channels"] = t.id
+                topics["channels"] = msg.id
             elif "позиц" in name:
-                topics["positions"] = t.id
-        return topics
+                topics["positions"] = msg.id
     except Exception as e:
-        log.error("Ошибка определения топиков: %s", e)
-        return {}
+        log.error("Ошибка сканирования топиков: %s", e)
+    return topics
 
 
 # ── основной цикл ─────────────────────────────────────────────────────────
@@ -149,13 +145,22 @@ async def main():
 
     if group_id:
         cfg["group_id"] = group_id
-        topics = await detect_topics(bot, group_id)
-        if not topics:
-            topics = await detect_topics(user, group_id)
-        cfg["topic_requests"] = topics.get("requests", 0)
-        cfg["topic_channels"] = topics.get("channels", 0)
-        cfg["topic_positions"] = topics.get("positions", 0)
-        if all([cfg["topic_requests"], cfg["topic_channels"], cfg["topic_positions"]]):
+        cfg["topic_requests"] = saved.get("topic_requests", 0)
+        cfg["topic_channels"] = saved.get("topic_channels", 0)
+        cfg["topic_positions"] = saved.get("topic_positions", 0)
+
+        # Если топики не сохранены — автодетект
+        if not all([cfg["topic_requests"], cfg["topic_channels"],
+                    cfg["topic_positions"]]):
+            topics = await detect_topics(bot, group_id)
+            if not topics:
+                topics = await detect_topics(user, group_id)
+            cfg["topic_requests"] = cfg["topic_requests"] or topics.get("requests", 0)
+            cfg["topic_channels"] = cfg["topic_channels"] or topics.get("channels", 0)
+            cfg["topic_positions"] = cfg["topic_positions"] or topics.get("positions", 0)
+
+        if all([cfg["topic_requests"], cfg["topic_channels"],
+                cfg["topic_positions"]]):
             log.info("Группа: %d | Запросы: %d | Каналы: %d | Позиции: %d",
                      cfg["group_id"], cfg["topic_requests"],
                      cfg["topic_channels"], cfg["topic_positions"])
@@ -168,46 +173,93 @@ async def main():
     async def cmd_setup(event):
         if not event.is_group:
             await event.reply(
-                "Отправь /setup в группе с топиками.\n\n"
-                "Инструкция:\n"
-                "1. Создай группу, включи «Темы»\n"
-                "2. Создай топики: Запросы, Каналы, Позиции\n"
-                "3. Добавь бота админом\n"
-                "4. Отправь /setup в группе"
+                "Настройка — в группе с топиками.\n\n"
+                "Отправь в каждом топике:\n"
+                "/setup запросы — в топике для уведомлений\n"
+                "/setup каналы — в топике для каналов\n"
+                "/setup позиции — в топике для позиций"
             )
             return
 
         gid = event.chat_id
-        topics = await detect_topics(bot, gid)
-        if not topics:
-            topics = await detect_topics(user, gid)
+        arg = event.text.partition(" ")[2].strip().lower()
+        tid = get_topic_id(event.message)
 
-        if not all(k in topics for k in ("requests", "channels", "positions")):
-            found = ", ".join(f"{k}={v}" for k, v in topics.items())
+        # /setup без аргумента — попробовать автодетект
+        if not arg:
+            topics = await detect_topics(bot, gid)
+            if not topics:
+                topics = await detect_topics(user, gid)
+
+            if all(k in topics for k in ("requests", "channels", "positions")):
+                cfg["group_id"] = gid
+                cfg["topic_requests"] = topics["requests"]
+                cfg["topic_channels"] = topics["channels"]
+                cfg["topic_positions"] = topics["positions"]
+                save_config({
+                    "group_id": gid,
+                    "topic_requests": topics["requests"],
+                    "topic_channels": topics["channels"],
+                    "topic_positions": topics["positions"],
+                })
+                await event.reply(
+                    f"✅ Автонастройка!\n\n"
+                    f"📥 Запросы → {topics['requests']}\n"
+                    f"📡 Каналы → {topics['channels']}\n"
+                    f"📦 Позиции → {topics['positions']}"
+                )
+                log.info("Auto-setup: group=%d r=%d c=%d p=%d",
+                         gid, topics["requests"], topics["channels"],
+                         topics["positions"])
+                return
+
             await event.reply(
-                f"❌ Не все топики найдены!\n"
-                f"Найдено: {found or 'ничего'}\n\n"
-                f"Создай топики с названиями:\n"
-                f"• Запросы\n• Каналы\n• Позиции\n\n"
-                f"И отправь /setup ещё раз"
+                "Автодетект не нашёл все топики.\n\n"
+                "Отправь в каждом топике:\n"
+                "/setup запросы\n"
+                "/setup каналы\n"
+                "/setup позиции"
             )
             return
 
-        cfg["group_id"] = gid
-        cfg["topic_requests"] = topics["requests"]
-        cfg["topic_channels"] = topics["channels"]
-        cfg["topic_positions"] = topics["positions"]
-        save_config({"group_id": gid})
+        # /setup <тип> — ручная привязка топика
+        if not tid:
+            await event.reply("Отправь эту команду внутри топика, не в General.")
+            return
 
-        await event.reply(
-            f"✅ Настроено!\n\n"
-            f"📥 Запросы → топик {topics['requests']}\n"
-            f"📡 Каналы → топик {topics['channels']}\n"
-            f"📦 Позиции → топик {topics['positions']}\n\n"
-            f"Отправляй каналы и позиции в соответствующие топики."
-        )
-        log.info("Setup: group=%d requests=%d channels=%d positions=%d",
-                 gid, topics["requests"], topics["channels"], topics["positions"])
+        cfg["group_id"] = gid
+
+        if "запрос" in arg:
+            cfg["topic_requests"] = tid
+            await event.reply("✅ Топик «Запросы» настроен")
+        elif "канал" in arg:
+            cfg["topic_channels"] = tid
+            await event.reply("✅ Топик «Каналы» настроен")
+        elif "позиц" in arg:
+            cfg["topic_positions"] = tid
+            await event.reply("✅ Топик «Позиции» настроен")
+        else:
+            await event.reply(
+                "Укажи тип:\n"
+                "/setup запросы\n"
+                "/setup каналы\n"
+                "/setup позиции"
+            )
+            return
+
+        save_config({
+            "group_id": gid,
+            "topic_requests": cfg["topic_requests"],
+            "topic_channels": cfg["topic_channels"],
+            "topic_positions": cfg["topic_positions"],
+        })
+
+        if all([cfg["topic_requests"], cfg["topic_channels"],
+                cfg["topic_positions"]]):
+            await event.reply("🎉 Все топики настроены! Бот готов к работе.")
+            log.info("Manual setup done: group=%d r=%d c=%d p=%d",
+                     gid, cfg["topic_requests"], cfg["topic_channels"],
+                     cfg["topic_positions"])
 
     # ── /start в личке ────────────────────────────────────────────────────
 
