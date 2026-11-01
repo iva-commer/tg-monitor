@@ -40,6 +40,8 @@ API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+_extra = os.getenv("ADMIN_IDS", "")
+ADMIN_IDS = {ADMIN_ID} | {int(x) for x in _extra.split(",") if x.strip().isdigit()}
 
 WEBAPP_URL = os.getenv("WEBAPP_URL", "")
 WEBAPP_DIR = Path(__file__).parent / "webapp"
@@ -416,7 +418,7 @@ async def main():
 
     await user.start(phone=os.getenv("PHONE", ""))
     await bot.start(bot_token=BOT_TOKEN)
-    log.info("Юзербот и бот запущены. ADMIN_ID=%d", ADMIN_ID)
+    log.info("Юзербот и бот запущены. ADMIN_IDS=%s", ADMIN_IDS)
 
     # ── загрузка конфига ──────────────────────────────────────────────────
 
@@ -454,7 +456,7 @@ async def main():
 
     # ── /setup ─────────────────────────────────────────────────────────────
 
-    @bot.on(events.NewMessage(pattern="/setup", from_users=ADMIN_ID))
+    @bot.on(events.NewMessage(pattern="/setup", from_users=list(ADMIN_IDS)))
     async def cmd_setup(event):
         if not event.is_group:
             await event.reply(
@@ -568,7 +570,7 @@ async def main():
     # ── /start в личке ────────────────────────────────────────────────────
 
     @bot.on(events.NewMessage(
-        pattern="/start", from_users=ADMIN_ID,
+        pattern="/start", from_users=list(ADMIN_IDS),
         func=lambda e: e.is_private,
     ))
     async def cmd_start(event):
@@ -585,7 +587,7 @@ async def main():
 
     # ── сообщения в группе ────────────────────────────────────────────────
 
-    @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
+    @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id in ADMIN_IDS))
     async def on_group_message(event):
         if not cfg["group_id"] or event.chat_id != cfg["group_id"]:
             return
@@ -844,7 +846,7 @@ async def main():
         func=lambda e: (
             e.is_group
             and e.document is not None
-            and e.sender_id == ADMIN_ID
+            and e.sender_id in ADMIN_IDS
             and e.chat_id == cfg.get("group_id")
         ),
     ))
@@ -905,7 +907,7 @@ async def main():
 
     @bot.on(events.CallbackQuery(pattern=rb"rc(\d+)"))
     async def cb_rm_channel(event):
-        if event.sender_id != ADMIN_ID:
+        if event.sender_id not in ADMIN_IDS:
             await event.answer("Нет доступа")
             return
         ch_id = int(event.pattern_match.group(1))
@@ -919,7 +921,7 @@ async def main():
 
     @bot.on(events.CallbackQuery(pattern=rb"rp(\w+)"))
     async def cb_rm_position(event):
-        if event.sender_id != ADMIN_ID:
+        if event.sender_id not in ADMIN_IDS:
             await event.answer("Нет доступа")
             return
         ph = event.pattern_match.group(1).decode()
@@ -934,7 +936,7 @@ async def main():
 
     @bot.on(events.CallbackQuery(pattern=rb"(on|off)(\d+)"))
     async def cb_toggle_position(event):
-        if event.sender_id != ADMIN_ID:
+        if event.sender_id not in ADMIN_IDS:
             await event.answer("Нет доступа")
             return
         action = event.pattern_match.group(1).decode()
@@ -968,7 +970,7 @@ async def main():
 
     @bot.on(events.CallbackQuery(pattern=rb"stop(\w+)"))
     async def cb_stop_position(event):
-        if event.sender_id != ADMIN_ID:
+        if event.sender_id not in ADMIN_IDS:
             await event.answer("Нет доступа")
             return
         ph = event.pattern_match.group(1).decode()
@@ -983,7 +985,7 @@ async def main():
 
     # ── команда /app ─────────────────────────────────────────────────────
 
-    @bot.on(events.NewMessage(pattern="/app", from_users=ADMIN_ID))
+    @bot.on(events.NewMessage(pattern="/app", from_users=list(ADMIN_IDS)))
     async def cmd_app(event):
         if not WEBAPP_URL:
             await event.respond("WEBAPP_URL не настроен в .env")
