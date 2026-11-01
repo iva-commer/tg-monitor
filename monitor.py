@@ -43,6 +43,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 DATA_DIR = Path(__file__).parent / "data"
 DATA_FILE = DATA_DIR / "data.json"
 CONFIG_FILE = DATA_DIR / "config.json"
+STATS_FILE = DATA_DIR / "stats.json"
 SESSION_DIR = Path(__file__).parent / "sessions"
 
 
@@ -52,6 +53,7 @@ cfg = {
     "topic_channels": 0,
     "topic_positions": 0,
     "topic_tags": 0,
+    "topic_analytics": 0,
 }
 
 
@@ -81,6 +83,28 @@ def load_data() -> dict:
 def save_data(data: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+
+
+def load_stats() -> dict:
+    if STATS_FILE.exists():
+        return json.loads(STATS_FILE.read_text("utf-8"))
+    return {}
+
+
+def save_stats(stats: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STATS_FILE.write_text(json.dumps(stats, ensure_ascii=False, indent=2), "utf-8")
+
+
+def record_match(channel_id: int, pos_hash_val: str) -> None:
+    MSK = timezone(timedelta(hours=3))
+    from datetime import datetime
+    today = datetime.now(MSK).strftime("%Y-%m-%d")
+    stats = load_stats()
+    day = stats.setdefault(today, {})
+    ch = day.setdefault(str(channel_id), {})
+    ch[pos_hash_val] = ch.get(pos_hash_val, 0) + 1
+    save_stats(stats)
 
 
 def load_config() -> dict:
@@ -260,6 +284,8 @@ async def detect_topics(client, group_id: int) -> dict:
                 topics["tags"] = msg.id
             elif "позиц" in name:
                 topics["positions"] = msg.id
+            elif "аналитик" in name:
+                topics["analytics"] = msg.id
     except Exception as e:
         log.error("Ошибка сканирования топиков: %s", e)
     return topics
@@ -288,6 +314,7 @@ async def main():
         cfg["topic_channels"] = saved.get("topic_channels", 0)
         cfg["topic_positions"] = saved.get("topic_positions", 0)
         cfg["topic_tags"] = saved.get("topic_tags", 0)
+        cfg["topic_analytics"] = saved.get("topic_analytics", 0)
 
         # Если топики не сохранены — автодетект
         if not all([cfg["topic_requests"], cfg["topic_channels"],
@@ -299,6 +326,7 @@ async def main():
             cfg["topic_channels"] = cfg["topic_channels"] or topics.get("channels", 0)
             cfg["topic_positions"] = cfg["topic_positions"] or topics.get("positions", 0)
             cfg["topic_tags"] = cfg["topic_tags"] or topics.get("tags", 0)
+            cfg["topic_analytics"] = cfg["topic_analytics"] or topics.get("analytics", 0)
 
         if all([cfg["topic_requests"], cfg["topic_channels"],
                 cfg["topic_positions"], cfg["topic_tags"]]):
@@ -340,19 +368,23 @@ async def main():
                 cfg["topic_channels"] = topics["channels"]
                 cfg["topic_positions"] = topics["positions"]
                 cfg["topic_tags"] = topics["tags"]
+                cfg["topic_analytics"] = topics.get("analytics", 0)
                 save_config({
                     "group_id": gid,
                     "topic_requests": topics["requests"],
                     "topic_channels": topics["channels"],
                     "topic_positions": topics["positions"],
                     "topic_tags": topics["tags"],
+                    "topic_analytics": cfg["topic_analytics"],
                 })
+                analytics_line = f"\n📊 Аналитика → {cfg['topic_analytics']}" if cfg["topic_analytics"] else ""
                 await event.reply(
                     f"✅ Автонастройка!\n\n"
                     f"📥 Запросы → {topics['requests']}\n"
                     f"📡 Каналы → {topics['channels']}\n"
                     f"📦 Позиции → {topics['positions']}\n"
                     f"🏷 Теги → {topics['tags']}"
+                    f"{analytics_line}"
                 )
                 log.info("Auto-setup: group=%d r=%d c=%d p=%d t=%d",
                          gid, topics["requests"], topics["channels"],
@@ -388,13 +420,17 @@ async def main():
         elif "тег" in arg:
             cfg["topic_tags"] = tid
             await event.reply("✅ Топик «Теги» настроен")
+        elif "аналитик" in arg:
+            cfg["topic_analytics"] = tid
+            await event.reply("✅ Топик «Аналитика» настроен")
         else:
             await event.reply(
                 "Укажи тип:\n"
                 "/setup запросы\n"
                 "/setup каналы\n"
                 "/setup позиции\n"
-                "/setup теги"
+                "/setup теги\n"
+                "/setup аналитика"
             )
             return
 
@@ -404,6 +440,7 @@ async def main():
             "topic_channels": cfg["topic_channels"],
             "topic_positions": cfg["topic_positions"],
             "topic_tags": cfg["topic_tags"],
+            "topic_analytics": cfg["topic_analytics"],
         })
 
         if all([cfg["topic_requests"], cfg["topic_channels"],
@@ -644,6 +681,44 @@ async def main():
             elif dupes:
                 await to_tags("⚠️ Уже есть: " + " | ".join(dupes))
 
+        # ── топик «Аналитика» ──────────────────────────────────────────
+        elif tid == cfg.get("topic_analytics") and cfg.get("topic_analytics"):
+            if text.lower() in ("/report", "/отчет"):
+                from datetime import datetime
+                MSK = timezone(timedelta(hours=3))
+                today = datetime.now(MSK).strftime("%Y-%m-%d")
+                stats = load_stats()
+                day_stats = stats.get(today, {})
+
+                if not day_stats:
+                    await to_tags(f"📊 Отчёт за {today}\n\nНет данных за сегодня.")
+                    return
+
+                data = load_data()
+                pos_map = {}
+                for p in data["positions"]:
+                    ph = pos_hash(p["kw"])
+                    label = ', '.join(p["kw"])
+                    if p.get("pr"):
+                        label += f" — {p['pr']}₽"
+                    pos_map[ph] = label
+
+                report_lines = [f"📊 Отчёт за {today}\n"]
+                for ch_id_str, positions in day_stats.items():
+                    try:
+                        entity = await user.get_entity(int(ch_id_str))
+                        ch_name = getattr(entity, "title", ch_id_str)
+                    except Exception:
+                        ch_name = ch_id_str
+                    report_lines.append(f"📡 {ch_name}:")
+                    for ph_val, count in sorted(positions.items(), key=lambda x: -x[1]):
+                        pos_label = pos_map.get(ph_val, ph_val)
+                        report_lines.append(f"  • {pos_label} — {count} запр.")
+                    report_lines.append("")
+
+                await to_tags("\n".join(report_lines))
+                return
+
     # ── файлы с позициями ─────────────────────────────────────────────────
 
     @bot.on(events.NewMessage(
@@ -813,6 +888,10 @@ async def main():
         matched = match_positions(msg_text, data["positions"])
         if not matched:
             return
+
+        for m in matched:
+            if isinstance(m, dict):
+                record_match(chat.id, pos_hash(m["kw"]))
 
         ch_title = getattr(chat, "title", str(chat.id))
         ch_username = getattr(chat, "username", None)
