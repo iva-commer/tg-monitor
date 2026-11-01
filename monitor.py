@@ -44,7 +44,6 @@ DATA_FILE = DATA_DIR / "data.json"
 CONFIG_FILE = DATA_DIR / "config.json"
 SESSION_DIR = Path(__file__).parent / "sessions"
 
-_copy_cache: dict[int, dict] = {}
 
 cfg = {
     "group_id": 0,
@@ -300,7 +299,6 @@ async def main():
 
     @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
     async def on_group_message(event):
-        log.info("GROUP MSG: chat=%s text=%r tid=%s", event.chat_id, (event.text or "")[:60], get_topic_id(event.message))
         if not cfg["group_id"] or event.chat_id != cfg["group_id"]:
             return
         if event.document:
@@ -527,30 +525,6 @@ async def main():
                 return
         await event.answer("Уже убрано")
 
-    # ── кнопки копирования ────────────────────────────────────────────────
-
-    @bot.on(events.CallbackQuery(data=b"copy_msg"))
-    async def cb_copy_msg(event):
-        cached = _copy_cache.get(event.message_id)
-        if cached:
-            await bot.send_message(
-                event.chat_id, cached["msg"],
-                reply_to=event.message_id,
-            )
-        else:
-            await event.answer("Устарело")
-
-    @bot.on(events.CallbackQuery(data=b"copy_pos"))
-    async def cb_copy_pos(event):
-        cached = _copy_cache.get(event.message_id)
-        if cached:
-            await bot.send_message(
-                event.chat_id, cached["pos"],
-                reply_to=event.message_id,
-            )
-        else:
-            await event.answer("Устарело")
-
     # ── мониторинг каналов (юзербот) ──────────────────────────────────────
 
     @user.on(events.NewMessage)
@@ -586,6 +560,7 @@ async def main():
             msg_link = f"https://t.me/c/{chat.id}/{event.id}"
 
         sender = await event.get_sender()
+        buyer_url = None
         if isinstance(sender, User):
             name = (
                 f"{sender.first_name or ''} {sender.last_name or ''}".strip()
@@ -596,14 +571,16 @@ async def main():
                     f"{name} (@{sender.username})\n"
                     f"https://t.me/{sender.username}"
                 )
+                buyer_url = f"https://t.me/{sender.username}"
             else:
                 buyer_line = f"{name} (tg://user?id={sender.id})"
+                buyer_url = f"tg://user?id={sender.id}"
         elif sender and hasattr(sender, "title"):
             buyer_line = sender.title
         else:
             buyer_line = "Аноним (пост канала)"
 
-        pos_str = "\n".join(f"  • {', '.join(m)}" for m in matched)
+        pos_str = "\n".join(f"`{', '.join(m)}`" for m in matched)
         display = msg_text[:800] + ("..." if len(msg_text) > 800 else "")
 
         notification = (
@@ -615,23 +592,19 @@ async def main():
             f"Позиция:\n{pos_str}"
         )
 
-        buttons = [[
-            Button.inline("📋 Сообщение", data=b"copy_msg"),
-            Button.inline("📋 Позиция", data=b"copy_pos"),
-        ]]
+        buttons = []
+        if buyer_url:
+            buttons.append([Button.url("💬 Чат", buyer_url)])
 
         try:
-            sent = await bot.send_message(
+            await bot.send_message(
                 cfg["group_id"],
                 notification,
                 reply_to=cfg["topic_requests"],
-                buttons=buttons,
+                buttons=buttons or None,
                 link_preview=False,
+                parse_mode="md",
             )
-            _copy_cache[sent.id] = {"msg": msg_text, "pos": pos_str}
-            if len(_copy_cache) > 500:
-                for k in sorted(_copy_cache)[:250]:
-                    del _copy_cache[k]
         except Exception:
             log.exception("Ошибка отправки уведомления")
 
