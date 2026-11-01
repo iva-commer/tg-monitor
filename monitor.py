@@ -818,18 +818,17 @@ async def main():
         if qty_match:
             qty = qty_match.group(1) or qty_match.group(2) or qty_match.group(3)
 
-        pos_lines = []
+        copy_lines = []
         for m in matched:
             kw = m["kw"] if isinstance(m, dict) else m
             price = m.get("pr", "") if isinstance(m, dict) else ""
-            copy_text = ', '.join(kw)
+            parts = [', '.join(kw)]
             if price:
-                copy_text += f" — {price}₽"
-            line = f"`{copy_text}`"
+                parts.append(f"{price}₽")
             if qty:
-                line += f"  — {qty} шт"
-            pos_lines.append(line)
-        pos_str = "\n".join(pos_lines)
+                parts.append(f"{qty} шт")
+            copy_lines.append(" — ".join(parts))
+        pos_str = "```\n" + "\n".join(copy_lines) + "\n```"
 
         display = msg_text[:800] + ("..." if len(msg_text) > 800 else "")
 
