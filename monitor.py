@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+from datetime import timezone, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -672,13 +673,31 @@ async def main():
         else:
             buyer_line = "Аноним (пост канала)"
 
-        pos_str = "\n".join(f"`{', '.join(m)}`" for m in matched)
+        MSK = timezone(timedelta(hours=3))
+        msg_time = event.date.astimezone(MSK).strftime("%H:%M")
+
+        qty_match = re.search(
+            r'(?:(\d+)\s*(?:шт|штук|pcs?|units?))|(?:[xхXХ](\d+))|(?:(\d+)\s*[xхXХ])',
+            msg_text, re.I,
+        )
+        qty = None
+        if qty_match:
+            qty = qty_match.group(1) or qty_match.group(2) or qty_match.group(3)
+
+        pos_lines = []
+        for m in matched:
+            line = f"`{', '.join(m)}`"
+            if qty:
+                line += f"  — {qty} шт"
+            pos_lines.append(line)
+        pos_str = "\n".join(pos_lines)
+
         display = msg_text[:800] + ("..." if len(msg_text) > 800 else "")
 
         notification = (
             f"📢 Совпадение!\n\n"
             f"Канал: {ch_title}\n\n"
-            f"Ссылка: {msg_link}\n\n"
+            f"Ссылка: {msg_link}  🕐 {msg_time}\n\n"
             f"Покупатель: {buyer_line}\n\n"
             f"Сообщение:\n{display}\n\n"
             f"Позиция:\n{pos_str}"
