@@ -192,7 +192,11 @@ def match_positions(text: str, positions: list) -> list:
             nkw = norm(kw)
             if nkw in _SOFT_UNITS:
                 continue
-            if nkw in n or nkw.replace(' ', '') in n_ns:
+            nkw_ns = nkw.replace(' ', '')
+            if nkw in n or nkw_ns in n_ns:
+                continue
+            no_z = nkw_ns.lstrip('z')
+            if no_z != nkw_ns and no_z and (no_z in n_ns or no_z in n):
                 continue
             stripped = _UNIT_TAIL.sub('', nkw)
             if stripped and stripped != nkw:
