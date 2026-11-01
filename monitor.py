@@ -92,6 +92,31 @@ _CYR = {
 _SOFT_UNITS = {'gb', 'tb', 'mp'}
 _UNIT_TAIL = re.compile(r'(gb|tb|mp)$')
 
+_COLOR_GROUPS = [
+    {'black', 'chernyy'},
+    {'white', 'belyy'},
+    {'blue', 'siniy', 'goluboy'},
+    {'red', 'krasnyy'},
+    {'green', 'zelenyy'},
+    {'gold', 'zolotoy'},
+    {'silver', 'serebristyy', 'serebryanyy'},
+    {'pink', 'rozovyy'},
+    {'purple', 'fioletovyy'},
+    {'gray', 'grey', 'seryy'},
+    {'yellow', 'zheltyy'},
+    {'orange', 'oranzhevyy'},
+    {'titanium', 'titanovyy'},
+    {'graphite', 'grafitovyy'},
+    {'coral', 'korallovyy'},
+    {'cream', 'kremovyy'},
+    {'lavender', 'lavandovyy'},
+    {'mint', 'myatnyy'},
+]
+_COLOR_LOOKUP: dict[str, set[str]] = {}
+for _grp in _COLOR_GROUPS:
+    for _f in _grp:
+        _COLOR_LOOKUP[_f] = _grp
+
 
 def norm(text: str) -> str:
     t = text.strip().lower()
@@ -101,6 +126,14 @@ def norm(text: str) -> str:
     result = ''.join(out)
     result = re.sub(r'(\d)\s*(gb|tb|mp)\b', r'\1\2', result)
     return re.sub(r'\s+', ' ', result)
+
+
+def _color_in_text(keyword_normed: str, text_normed: str) -> bool:
+    for word in keyword_normed.split():
+        group = _COLOR_LOOKUP.get(word)
+        if group:
+            return any(form in text_normed for form in group)
+    return False
 
 
 def match_positions(text: str, positions: list) -> list:
@@ -117,6 +150,8 @@ def match_positions(text: str, positions: list) -> list:
                 continue
             stripped = _UNIT_TAIL.sub('', nkw)
             if stripped and stripped != nkw and stripped in n:
+                continue
+            if _color_in_text(nkw, n):
                 continue
             ok = False
             break
