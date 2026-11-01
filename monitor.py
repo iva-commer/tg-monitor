@@ -108,6 +108,8 @@ _CYR = {
 _SOFT_UNITS = {'gb', 'tb', 'mp'}
 _UNIT_TAIL = re.compile(r'(gb|tb|mp)$')
 
+_MODEL_MODIFIERS = {'ultra', 'plus', 'pro', 'max', 'lite', 'mini', 'note', 'fe'}
+
 _COLOR_GROUPS = [
     {'black', 'chernyy'},
     {'white', 'belyy'},
@@ -216,6 +218,13 @@ def match_positions(text: str, positions: list) -> list:
                 continue
             ok = False
             break
+        if ok:
+            kw_norms = {norm(kw) for kw in keywords}
+            msg_words = set(n.split())
+            for mod in _MODEL_MODIFIERS:
+                if mod in msg_words and mod not in kw_norms:
+                    ok = False
+                    break
         if ok:
             matched.append(pos)
     return matched
