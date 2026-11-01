@@ -136,12 +136,36 @@ def _color_in_text(keyword_normed: str, text_normed: str) -> bool:
     return False
 
 
+def _split_position(keywords: list) -> list:
+    result = []
+    for kw in keywords:
+        kw = kw.strip()
+        if not kw:
+            continue
+        if ',' in kw or len(kw.split()) <= 3:
+            result.append(kw)
+        else:
+            words = kw.split()
+            i = 0
+            while i < len(words):
+                if i + 1 < len(words) and norm(words[i + 1]) in _COLOR_LOOKUP:
+                    result.append(f"{words[i]} {words[i + 1]}")
+                    i += 2
+                else:
+                    result.append(words[i])
+                    i += 1
+    return result
+
+
 def match_positions(text: str, positions: list) -> list:
     n = norm(text)
     n_ns = n.replace(' ', '')
     matched = []
     for pos in positions:
-        keywords = pos if isinstance(pos, list) else [pos]
+        raw = pos if isinstance(pos, list) else [pos]
+        keywords = _split_position(raw)
+        if not keywords:
+            continue
         ok = True
         for kw in keywords:
             nkw = norm(kw)
@@ -153,12 +177,12 @@ def match_positions(text: str, positions: list) -> list:
             if stripped and stripped != nkw:
                 if stripped in n or stripped in n_ns:
                     continue
-            if _color_in_text(nkw, n):
+            if len(nkw.split()) <= 3 and _color_in_text(nkw, n):
                 continue
             ok = False
             break
         if ok:
-            matched.append(keywords)
+            matched.append(raw)
     return matched
 
 
