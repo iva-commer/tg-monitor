@@ -585,8 +585,13 @@ async def main():
 
     # ── сообщения в группе ────────────────────────────────────────────────
 
-    @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
+    @bot.on(events.NewMessage(func=lambda e: e.is_group))
     async def on_group_message(event):
+        log.info("BOT got group msg: chat=%s sender=%s admin=%s text=%r",
+                 event.chat_id, event.sender_id, ADMIN_ID,
+                 (event.text or "")[:80])
+        if event.sender_id != ADMIN_ID:
+            return
         if not cfg["group_id"] or event.chat_id != cfg["group_id"]:
             return
         if event.document:
