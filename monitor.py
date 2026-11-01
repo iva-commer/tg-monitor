@@ -559,7 +559,9 @@ async def main():
                 await to_tags(f"Удалено позиций: {cnt}")
                 return
 
-            added = 0
+            added_items = []
+            dupes = []
+            data = load_data()
             for line in text.splitlines():
                 line = line.strip()
                 if not line or line.startswith("/"):
@@ -574,33 +576,38 @@ async def main():
                 if not keywords:
                     continue
 
-                data = load_data()
                 norm_new = [norm(k) for k in keywords]
                 if any(
                     [norm(k) for k in p["kw"]] == norm_new
                     for p in data["positions"]
                 ):
-                    await to_tags(f"⚠️ Уже есть: {', '.join(keywords)}")
+                    dupes.append(', '.join(keywords))
                     continue
 
-                data["positions"].append({"kw": keywords, "pr": price, "on": True})
+                entry = {"kw": keywords, "pr": price, "on": True}
+                data["positions"].append(entry)
+                added_items.append(entry)
+
+            if added_items:
                 save_data(data)
-                added += 1
-
-                label = ', '.join(keywords)
-                if price:
-                    label += f" — {price}₽"
-                ph = pos_hash(keywords)
-                await to_tags(
-                    f"✅ {label}",
-                    buttons=[Button.inline(
-                        "❌ Убрать", data=f"rp{ph}".encode(),
-                    )],
-                )
-
-            if added:
-                data = load_data()
-                await to_tags(f"Всего позиций: {len(data['positions'])}")
+                lines = []
+                buttons = []
+                for entry in added_items:
+                    label = ', '.join(entry["kw"])
+                    if entry["pr"]:
+                        label += f" — {entry['pr']}₽"
+                    lines.append(f"✅ {label}")
+                    ph = pos_hash(entry["kw"])
+                    buttons.append([Button.inline(
+                        f"❌ {', '.join(entry['kw'])[:25]}",
+                        data=f"rp{ph}".encode(),
+                    )])
+                msg = "\n".join(lines) + f"\n\nВсего позиций: {len(data['positions'])}"
+                if dupes:
+                    msg += "\n\n⚠️ Уже были: " + " | ".join(dupes)
+                await to_tags(msg, buttons=buttons)
+            elif dupes:
+                await to_tags("⚠️ Уже есть: " + " | ".join(dupes))
 
     # ── файлы с позициями ─────────────────────────────────────────────────
 
