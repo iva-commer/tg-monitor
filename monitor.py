@@ -138,6 +138,7 @@ def _color_in_text(keyword_normed: str, text_normed: str) -> bool:
 
 def match_positions(text: str, positions: list) -> list:
     n = norm(text)
+    n_ns = n.replace(' ', '')
     matched = []
     for pos in positions:
         keywords = pos if isinstance(pos, list) else [pos]
@@ -146,11 +147,12 @@ def match_positions(text: str, positions: list) -> list:
             nkw = norm(kw)
             if nkw in _SOFT_UNITS:
                 continue
-            if nkw in n:
+            if nkw in n or nkw.replace(' ', '') in n_ns:
                 continue
             stripped = _UNIT_TAIL.sub('', nkw)
-            if stripped and stripped != nkw and stripped in n:
-                continue
+            if stripped and stripped != nkw:
+                if stripped in n or stripped in n_ns:
+                    continue
             if _color_in_text(nkw, n):
                 continue
             ok = False
