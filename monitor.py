@@ -26,7 +26,7 @@ from pathlib import Path
 from aiohttp import web as aio_web
 from dotenv import load_dotenv
 from telethon import TelegramClient, Button, events
-from telethon.tl.types import User, ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButtonWebView
+from telethon.tl.types import User
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -989,14 +989,10 @@ async def main():
             await event.respond("WEBAPP_URL не настроен в .env")
             return
         url = WEBAPP_URL.rstrip("/") + "/app/"
-        markup = ReplyKeyboardMarkup(
-            rows=[KeyboardButtonRow(buttons=[
-                KeyboardButtonWebView(text="\U0001f4f1 Панель управления", url=url)
-            ])],
-            resize=True,
-            single_use=True,
+        await event.respond(
+            "\U0001f4f1 Панель управления",
+            buttons=[[Button.url("Открыть", url)]],
         )
-        await event.respond("Нажми кнопку ниже:", buttons=markup)
 
     # ── мониторинг каналов (юзербот) ──────────────────────────────────────
 
