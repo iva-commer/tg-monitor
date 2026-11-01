@@ -452,26 +452,6 @@ async def main():
         else:
             log.warning("Не все топики найдены. Отправь /setup в группе.")
 
-    # ── диагностика: ловим ВСЕ сообщения бота ──────────────────────────────
-
-    @bot.on(events.NewMessage)
-    async def on_any_bot_message(event):
-        log.info("BOT ANY: chat=%s is_group=%s is_private=%s sender=%s text=%r",
-                 event.chat_id, event.is_group, event.is_private,
-                 event.sender_id, (event.text or "")[:60])
-
-    # пробуем отправить тестовое сообщение при старте
-    if cfg["group_id"] and cfg["topic_tags"]:
-        try:
-            await bot.send_message(
-                cfg["group_id"],
-                "🔧 Бот перезапущен и работает.",
-                reply_to=cfg["topic_tags"],
-            )
-            log.info("Тестовое сообщение отправлено в группу")
-        except Exception as e:
-            log.error("Не удалось отправить в группу: %s", e)
-
     # ── /setup ─────────────────────────────────────────────────────────────
 
     @bot.on(events.NewMessage(pattern="/setup", from_users=ADMIN_ID))
@@ -605,13 +585,8 @@ async def main():
 
     # ── сообщения в группе ────────────────────────────────────────────────
 
-    @bot.on(events.NewMessage(func=lambda e: e.is_group))
+    @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
     async def on_group_message(event):
-        log.info("BOT got group msg: chat=%s sender=%s admin=%s text=%r",
-                 event.chat_id, event.sender_id, ADMIN_ID,
-                 (event.text or "")[:80])
-        if event.sender_id != ADMIN_ID:
-            return
         if not cfg["group_id"] or event.chat_id != cfg["group_id"]:
             return
         if event.document:
