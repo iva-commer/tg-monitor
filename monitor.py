@@ -300,6 +300,7 @@ async def main():
 
     @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
     async def on_group_message(event):
+        log.info("GROUP MSG: chat=%s text=%r tid=%s", event.chat_id, (event.text or "")[:60], get_topic_id(event.message))
         if not cfg["group_id"] or event.chat_id != cfg["group_id"]:
             return
         if event.document:
