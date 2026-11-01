@@ -80,8 +80,27 @@ def save_config(c: dict) -> None:
 
 # ── утилиты ────────────────────────────────────────────────────────────────
 
+_CYR = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e',
+    'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k',
+    'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r',
+    'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts',
+    'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
+    'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+_SOFT_UNITS = {'gb', 'tb', 'mp'}
+_UNIT_TAIL = re.compile(r'(gb|tb|mp)$')
+
+
 def norm(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
+    t = text.strip().lower()
+    out = []
+    for ch in t:
+        out.append(_CYR.get(ch, ch))
+    result = ''.join(out)
+    result = re.sub(r'(\d)\s*(gb|tb|mp)\b', r'\1\2', result)
+    return re.sub(r'\s+', ' ', result)
 
 
 def match_positions(text: str, positions: list) -> list:
@@ -89,7 +108,19 @@ def match_positions(text: str, positions: list) -> list:
     matched = []
     for pos in positions:
         keywords = pos if isinstance(pos, list) else [pos]
-        if all(norm(kw) in n for kw in keywords):
+        ok = True
+        for kw in keywords:
+            nkw = norm(kw)
+            if nkw in _SOFT_UNITS:
+                continue
+            if nkw in n:
+                continue
+            stripped = _UNIT_TAIL.sub('', nkw)
+            if stripped and stripped != nkw and stripped in n:
+                continue
+            ok = False
+            break
+        if ok:
             matched.append(keywords)
     return matched
 
