@@ -59,7 +59,15 @@ cfg = {
 
 def load_data() -> dict:
     if DATA_FILE.exists():
-        return json.loads(DATA_FILE.read_text("utf-8"))
+        data = json.loads(DATA_FILE.read_text("utf-8"))
+        migrated = False
+        for i, pos in enumerate(data.get("positions", [])):
+            if isinstance(pos, list):
+                data["positions"][i] = {"kw": pos, "pr": "", "on": True}
+                migrated = True
+        if migrated:
+            save_data(data)
+        return data
     return {"positions": [], "channels": []}
 
 
@@ -163,7 +171,12 @@ def match_positions(text: str, positions: list) -> list:
     n_ns = n.replace(' ', '')
     matched = []
     for pos in positions:
-        raw = pos if isinstance(pos, list) else [pos]
+        if isinstance(pos, dict):
+            if not pos.get("on", True):
+                continue
+            raw = pos["kw"]
+        else:
+            raw = pos if isinstance(pos, list) else [pos]
         keywords = _split_position(raw)
         if not keywords:
             continue
@@ -183,7 +196,7 @@ def match_positions(text: str, positions: list) -> list:
             ok = False
             break
         if ok:
-            matched.append(raw)
+            matched.append(pos)
     return matched
 
 
@@ -478,11 +491,64 @@ async def main():
                 if not data["positions"]:
                     await to_tags("Пусто. Отправь ключевые слова через запятую.")
                     return
-                lines = [
-                    f"{i + 1}. {', '.join(p)}"
-                    for i, p in enumerate(data["positions"])
-                ]
-                await to_tags("📋 Позиции:\n" + "\n".join(lines))
+                lines = []
+                for i, p in enumerate(data["positions"]):
+                    status = "▶️" if p.get("on", True) else "⏸"
+                    kw_str = ', '.join(p["kw"])
+                    price_str = f"  — {p['pr']}₽" if p.get("pr") else ""
+                    lines.append(f"{status} {i + 1}. {kw_str}{price_str}")
+                buttons = []
+                for i, p in enumerate(data["positions"]):
+                    row = []
+                    if p.get("on", True):
+                        row.append(Button.inline(f"⏸ {i+1}", data=f"off{i}".encode()))
+                    else:
+                        row.append(Button.inline(f"▶️ {i+1}", data=f"on{i}".encode()))
+                    ph = pos_hash(p["kw"])
+                    row.append(Button.inline(f"❌ {i+1}", data=f"rp{ph}".encode()))
+                    buttons.append(row)
+                await to_tags(
+                    "📋 Позиции:\n" + "\n".join(lines),
+                    buttons=buttons,
+                )
+                return
+
+            cmd_lower = text.lower().split()
+            if cmd_lower and cmd_lower[0] == "/on" and len(cmd_lower) >= 2 and cmd_lower[1].isdigit():
+                idx = int(cmd_lower[1]) - 1
+                data = load_data()
+                if 0 <= idx < len(data["positions"]):
+                    data["positions"][idx]["on"] = True
+                    save_data(data)
+                    kw_str = ', '.join(data["positions"][idx]["kw"])
+                    await to_tags(f"▶️ Включена: {kw_str}")
+                else:
+                    await to_tags("❌ Неверный номер")
+                return
+
+            if cmd_lower and cmd_lower[0] == "/off" and len(cmd_lower) >= 2 and cmd_lower[1].isdigit():
+                idx = int(cmd_lower[1]) - 1
+                data = load_data()
+                if 0 <= idx < len(data["positions"]):
+                    data["positions"][idx]["on"] = False
+                    save_data(data)
+                    kw_str = ', '.join(data["positions"][idx]["kw"])
+                    await to_tags(f"⏸ Выключена: {kw_str}")
+                else:
+                    await to_tags("❌ Неверный номер")
+                return
+
+            if cmd_lower and cmd_lower[0] == "/price" and len(cmd_lower) >= 3 and cmd_lower[1].isdigit():
+                idx = int(cmd_lower[1]) - 1
+                new_price = cmd_lower[2].replace(" ", "")
+                data = load_data()
+                if 0 <= idx < len(data["positions"]):
+                    data["positions"][idx]["pr"] = new_price
+                    save_data(data)
+                    kw_str = ', '.join(data["positions"][idx]["kw"])
+                    await to_tags(f"💰 {kw_str} — {new_price}₽")
+                else:
+                    await to_tags("❌ Неверный номер")
                 return
 
             if text.lower() == "/clear":
@@ -502,19 +568,31 @@ async def main():
                 if not keywords:
                     continue
 
+                price = ""
+                if keywords and re.fullmatch(r'\d[\d\s]*', keywords[-1]):
+                    price = keywords.pop().replace(" ", "")
+                if not keywords:
+                    continue
+
                 data = load_data()
                 norm_new = [norm(k) for k in keywords]
-                if any([norm(k) for k in p] == norm_new for p in data["positions"]):
+                if any(
+                    [norm(k) for k in p["kw"]] == norm_new
+                    for p in data["positions"]
+                ):
                     await to_tags(f"⚠️ Уже есть: {', '.join(keywords)}")
                     continue
 
-                data["positions"].append(keywords)
+                data["positions"].append({"kw": keywords, "pr": price, "on": True})
                 save_data(data)
                 added += 1
 
+                label = ', '.join(keywords)
+                if price:
+                    label += f" — {price}₽"
                 ph = pos_hash(keywords)
                 await to_tags(
-                    f"✅ {', '.join(keywords)}",
+                    f"✅ {label}",
                     buttons=[Button.inline(
                         "❌ Убрать", data=f"rp{ph}".encode(),
                     )],
@@ -563,20 +641,20 @@ async def main():
                 else:
                     continue
                 if kw:
-                    data["positions"].append(kw)
+                    data["positions"].append({"kw": kw, "pr": "", "on": True})
                     added += 1
         elif name.endswith(".csv"):
             for row in csv.reader(io.StringIO(content)):
                 kw = [c.strip() for c in row if c.strip()]
                 if kw:
-                    data["positions"].append(kw)
+                    data["positions"].append({"kw": kw, "pr": "", "on": True})
                     added += 1
         elif name.endswith(".txt"):
             for line_text in content.splitlines():
                 line_text = line_text.strip()
                 if line_text:
                     kw = [k.strip() for k in line_text.split(",") if k.strip()]
-                    data["positions"].append(kw)
+                    data["positions"].append({"kw": kw, "pr": "", "on": True})
                     added += 1
 
         save_data(data)
@@ -611,12 +689,61 @@ async def main():
         ph = event.pattern_match.group(1).decode()
         data = load_data()
         for i, pos in enumerate(data["positions"]):
-            if pos_hash(pos) == ph:
+            if pos_hash(pos["kw"]) == ph:
                 removed = data["positions"].pop(i)
                 save_data(data)
-                await event.edit(f"❌ Убрано: {', '.join(removed)}")
+                await event.edit(f"❌ Убрано: {', '.join(removed['kw'])}")
                 return
         await event.answer("Уже убрано")
+
+    @bot.on(events.CallbackQuery(pattern=rb"(on|off)(\d+)"))
+    async def cb_toggle_position(event):
+        if event.sender_id != ADMIN_ID:
+            await event.answer("Нет доступа")
+            return
+        action = event.pattern_match.group(1).decode()
+        idx = int(event.pattern_match.group(2))
+        data = load_data()
+        if 0 <= idx < len(data["positions"]):
+            data["positions"][idx]["on"] = (action == "on")
+            save_data(data)
+            lines = []
+            for i, p in enumerate(data["positions"]):
+                status = "▶️" if p.get("on", True) else "⏸"
+                kw_str = ', '.join(p["kw"])
+                price_str = f"  — {p['pr']}₽" if p.get("pr") else ""
+                lines.append(f"{status} {i + 1}. {kw_str}{price_str}")
+            buttons = []
+            for i, p in enumerate(data["positions"]):
+                row = []
+                if p.get("on", True):
+                    row.append(Button.inline(f"⏸ {i+1}", data=f"off{i}".encode()))
+                else:
+                    row.append(Button.inline(f"▶️ {i+1}", data=f"on{i}".encode()))
+                ph = pos_hash(p["kw"])
+                row.append(Button.inline(f"❌ {i+1}", data=f"rp{ph}".encode()))
+                buttons.append(row)
+            await event.edit(
+                "📋 Позиции:\n" + "\n".join(lines),
+                buttons=buttons,
+            )
+        else:
+            await event.answer("Позиция не найдена")
+
+    @bot.on(events.CallbackQuery(pattern=rb"stop(\w+)"))
+    async def cb_stop_position(event):
+        if event.sender_id != ADMIN_ID:
+            await event.answer("Нет доступа")
+            return
+        ph = event.pattern_match.group(1).decode()
+        data = load_data()
+        for pos in data["positions"]:
+            if pos_hash(pos["kw"]) == ph:
+                pos["on"] = False
+                save_data(data)
+                await event.answer(f"⏸ {', '.join(pos['kw'])} выключена")
+                return
+        await event.answer("Позиция не найдена")
 
     # ── мониторинг каналов (юзербот) ──────────────────────────────────────
 
@@ -686,7 +813,12 @@ async def main():
 
         pos_lines = []
         for m in matched:
-            line = f"`{', '.join(m)}`"
+            kw = m["kw"] if isinstance(m, dict) else m
+            price = m.get("pr", "") if isinstance(m, dict) else ""
+            copy_text = ', '.join(kw)
+            if price:
+                copy_text += f" — {price}₽"
+            line = f"`{copy_text}`"
             if qty:
                 line += f"  — {qty} шт"
             pos_lines.append(line)
@@ -706,6 +838,13 @@ async def main():
         buttons = []
         if buyer_url:
             buttons.append([Button.url("💬 Чат", buyer_url)])
+        for m in matched:
+            if isinstance(m, dict):
+                ph = pos_hash(m["kw"])
+                buttons.append([Button.inline(
+                    f"⏸ Стоп: {', '.join(m['kw'])[:30]}",
+                    data=f"stop{ph}".encode(),
+                )])
 
         try:
             await bot.send_message(
