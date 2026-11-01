@@ -301,18 +301,16 @@ async def main():
             if text.lower() == "/list":
                 data = load_data()
                 if not data["channels"]:
-                    await event.reply("Пусто. Отправь @канал или ссылку.")
+                    await event.reply("Пусто. Отправь ID канала (число).")
                     return
                 lines = []
                 for ch_id in data["channels"]:
                     try:
                         entity = await user.get_entity(ch_id)
                         title = getattr(entity, "title", str(ch_id))
-                        uname = getattr(entity, "username", None)
-                        tag = f" (@{uname})" if uname else ""
-                        lines.append(f"• {title}{tag}")
+                        lines.append(f"• {title} ({ch_id})")
                     except Exception:
-                        lines.append(f"• ID: {ch_id}")
+                        lines.append(f"• {ch_id}")
                 await event.reply("📡 Каналы:\n" + "\n".join(lines))
                 return
 
@@ -329,38 +327,30 @@ async def main():
                 if not line or line.startswith("/"):
                     continue
 
-                ref = line
-                m = re.search(r'@(\w{5,})', line)
-                if m:
-                    ref = m.group(0)
-                else:
-                    m = re.search(
-                        r'https?://t\.me/(\+[\w-]+|joinchat/[\w-]+|\w{5,})', line,
-                    )
-                    if m:
-                        full = m.group(0)
-                        if "/+" in full or "/joinchat/" in full:
-                            ref = full
-                        else:
-                            ref = f"@{m.group(1)}"
-
-                try:
-                    entity = await user.get_entity(ref)
-                    ch_id = entity.id
-                    ch_title = getattr(entity, "title", ref)
-                except Exception as e:
-                    await event.reply(f"❌ {ref}: {e}")
+                # Извлечь числовой ID
+                digits = re.sub(r"[^\d]", "", line)
+                if not digits:
+                    await event.reply(f"❌ Не число: {line}")
                     continue
+                ch_id = int(digits)
 
                 data = load_data()
                 if ch_id in data["channels"]:
-                    await event.reply(f"⚠️ Уже есть: {ch_title}")
+                    await event.reply(f"⚠️ Уже есть: {ch_id}")
                     continue
 
                 data["channels"].append(ch_id)
                 save_data(data)
+
+                # Попробовать получить название
+                try:
+                    entity = await user.get_entity(ch_id)
+                    ch_title = getattr(entity, "title", str(ch_id))
+                except Exception:
+                    ch_title = str(ch_id)
+
                 await event.reply(
-                    f"✅ {ch_title}",
+                    f"✅ {ch_title} ({ch_id})",
                     buttons=[Button.inline(
                         "❌ Убрать", data=f"rc{ch_id}".encode(),
                     )],
