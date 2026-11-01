@@ -65,6 +65,13 @@ def load_data() -> dict:
             if isinstance(pos, list):
                 data["positions"][i] = {"kw": pos, "pr": "", "on": True}
                 migrated = True
+        for pos in data.get("positions", []):
+            if not pos.get("pr") and len(pos["kw"]) == 1:
+                m = re.search(r'\s+(\d{4,})$', pos["kw"][0])
+                if m:
+                    pos["pr"] = m.group(1)
+                    pos["kw"][0] = pos["kw"][0][:m.start()]
+                    migrated = True
         if migrated:
             save_data(data)
         return data
@@ -573,7 +580,12 @@ async def main():
                 price = ""
                 if keywords and re.fullmatch(r'\d[\d\s]*', keywords[-1]):
                     price = keywords.pop().replace(" ", "")
-                if not keywords:
+                elif len(keywords) == 1:
+                    m_pr = re.search(r'\s+(\d{4,})$', keywords[0])
+                    if m_pr:
+                        price = m_pr.group(1)
+                        keywords[0] = keywords[0][:m_pr.start()]
+                if not keywords or not keywords[0]:
                     continue
 
                 norm_new = [norm(k) for k in keywords]
