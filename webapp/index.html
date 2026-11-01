@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Monitor</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --radius: 14px;
+      --gap: 10px;
+      --pad: 16px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+      color: var(--tg-theme-text-color, #000);
+      min-height: 100vh;
+      padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+      overflow-x: hidden;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; gap: 4px;
+      padding: 8px var(--pad);
+      background: var(--tg-theme-bg-color, #fff);
+      border-bottom: 0.5px solid rgba(128,128,128,0.15);
+    }
+    .tab {
+      flex: 1; padding: 10px 4px; border: none; background: transparent;
+      color: var(--tg-theme-hint-color, #999);
+      font-size: 13px; font-weight: 600; border-radius: 10px;
+      cursor: pointer; transition: all 0.2s; letter-spacing: -0.2px;
+    }
+    .tab.active {
+      background: var(--tg-theme-button-color, #007aff);
+      color: var(--tg-theme-button-text-color, #fff);
+    }
+
+    /* ── Content ── */
+    .content { padding: var(--pad); }
+    .panel { display: none; animation: fadeIn 0.2s ease; }
+    .panel.active { display: block; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Summary ── */
+    .summary { display: flex; gap: 8px; margin-bottom: 12px; }
+    .summary-card {
+      flex: 1; padding: 14px 8px;
+      background: var(--tg-theme-bg-color, #fff);
+      border-radius: var(--radius); text-align: center;
+    }
+    .summary-card .value {
+      font-size: 24px; font-weight: 700;
+      color: var(--tg-theme-text-color, #000);
+    }
+    .summary-card .label {
+      font-size: 11px; color: var(--tg-theme-hint-color, #999);
+      margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .summary-card.accent .value { color: var(--tg-theme-button-color, #007aff); }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--tg-theme-bg-color, #fff);
+      border-radius: var(--radius); padding: 14px 16px;
+      margin-bottom: var(--gap); transition: transform 0.15s, opacity 0.3s;
+    }
+    .card:active { transform: scale(0.98); }
+    .card.removing {
+      opacity: 0; transform: translateX(-100%);
+      transition: all 0.3s ease;
+    }
+    .card-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 12px;
+    }
+    .card-title { font-size: 15px; font-weight: 600; line-height: 1.35; flex: 1; }
+    .card-meta {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-top: 10px;
+    }
+    .price-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px;
+      background: var(--tg-theme-button-color, #007aff);
+      color: var(--tg-theme-button-text-color, #fff);
+      border-radius: 20px; font-size: 13px; font-weight: 600;
+    }
+    .no-price { font-size: 12px; color: var(--tg-theme-hint-color, #999); }
+    .card.paused { opacity: 0.5; }
+    .card.paused .card-title {
+      text-decoration: line-through;
+      text-decoration-color: var(--tg-theme-hint-color);
+    }
+
+    /* ── Toggle ── */
+    .toggle { position: relative; width: 44px; height: 26px; cursor: pointer; flex-shrink: 0; }
+    .toggle input { display: none; }
+    .toggle .slider {
+      position: absolute; inset: 0;
+      background: var(--tg-theme-hint-color, #ccc);
+      border-radius: 26px; transition: background 0.25s;
+    }
+    .toggle .slider::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 22px; height: 22px; background: #fff;
+      border-radius: 50%; transition: transform 0.25s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle input:checked + .slider { background: var(--tg-theme-button-color, #007aff); }
+    .toggle input:checked + .slider::after { transform: translateX(18px); }
+
+    /* ── Delete btn ── */
+    .btn-delete {
+      width: 32px; height: 32px; border: none; background: none;
+      color: var(--tg-theme-hint-color, #999); font-size: 18px;
+      cursor: pointer; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .btn-delete:active { background: rgba(255,59,48,0.1); color: #ff3b30; }
+
+    /* ── Channel ── */
+    .channel-card { display: flex; align-items: center; gap: 12px; }
+    .channel-icon {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: var(--tg-theme-button-color, #007aff);
+      color: var(--tg-theme-button-text-color, #fff);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .channel-info { flex: 1; min-width: 0; }
+    .channel-name { font-size: 15px; font-weight: 600; }
+    .channel-id {
+      font-size: 12px; color: var(--tg-theme-hint-color, #999);
+      font-family: 'SF Mono', Menlo, monospace;
+    }
+
+    /* ── Stats ── */
+    .stats-date {
+      display: flex; align-items: center; justify-content: center;
+      gap: 16px; margin-bottom: 16px;
+    }
+    .stats-date button {
+      width: 36px; height: 36px; border: none;
+      background: var(--tg-theme-bg-color, #fff);
+      color: var(--tg-theme-text-color, #000);
+      border-radius: 50%; font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .stats-date .date-text {
+      font-size: 15px; font-weight: 600;
+      min-width: 140px; text-align: center;
+    }
+    .stats-channel { margin-bottom: 16px; }
+    .stats-channel-header {
+      font-size: 12px; font-weight: 600;
+      color: var(--tg-theme-hint-color, #999);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 0 4px; margin-bottom: 6px;
+    }
+    .stats-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 16px;
+      background: var(--tg-theme-bg-color, #fff);
+      margin-bottom: 2px;
+    }
+    .stats-row:first-of-type { border-radius: var(--radius) var(--radius) 0 0; }
+    .stats-row:last-of-type { border-radius: 0 0 var(--radius) var(--radius); margin-bottom: 0; }
+    .stats-row:only-of-type { border-radius: var(--radius); }
+    .stats-pos-name { font-size: 14px; flex: 1; }
+    .stats-count {
+      font-size: 15px; font-weight: 700;
+      color: var(--tg-theme-button-color, #007aff);
+      min-width: 36px; text-align: right;
+    }
+
+    /* ── FAB ── */
+    .fab {
+      position: fixed;
+      bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      right: 20px; width: 56px; height: 56px;
+      border: none;
+      background: var(--tg-theme-button-color, #007aff);
+      color: var(--tg-theme-button-text-color, #fff);
+      border-radius: 50%; font-size: 30px; font-weight: 300;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      z-index: 50;
+      transition: transform 0.25s cubic-bezier(0.4,0,0.2,1),
+                  opacity 0.25s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .fab:active { transform: scale(0.88); }
+    .fab.hidden { transform: scale(0); opacity: 0; pointer-events: none; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 200;
+      display: flex; align-items: flex-end; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s;
+    }
+    .modal-overlay.show { opacity: 1; pointer-events: auto; }
+    .modal {
+      width: 100%; max-width: 480px;
+      background: var(--tg-theme-bg-color, #fff);
+      border-radius: var(--radius) var(--radius) 0 0;
+      padding: 20px var(--pad) calc(20px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    }
+    .modal-overlay.show .modal { transform: translateY(0); }
+    .modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+    .modal textarea {
+      width: 100%; min-height: 100px; padding: 12px;
+      border: 1.5px solid rgba(128,128,128,0.25);
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+      color: var(--tg-theme-text-color, #000);
+      font-size: 15px; font-family: inherit;
+      resize: vertical; outline: none; transition: border-color 0.2s;
+    }
+    .modal textarea:focus { border-color: var(--tg-theme-button-color, #007aff); }
+    .modal textarea::placeholder { color: var(--tg-theme-hint-color, #999); }
+    .modal .hint {
+      font-size: 12px; color: var(--tg-theme-hint-color, #999);
+      margin-top: 8px; line-height: 1.4;
+    }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .modal-actions button {
+      flex: 1; padding: 14px; border: none; border-radius: 12px;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .btn-cancel {
+      background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+      color: var(--tg-theme-text-color, #000);
+    }
+    .btn-submit {
+      background: var(--tg-theme-button-color, #007aff);
+      color: var(--tg-theme-button-text-color, #fff);
+    }
+    .btn-submit:disabled { opacity: 0.4; }
+
+    /* ── Confirm ── */
+    .confirm-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    }
+    .confirm-overlay.show { opacity: 1; pointer-events: auto; }
+    .confirm-dialog {
+      width: calc(100% - 48px); max-width: 300px;
+      background: var(--tg-theme-bg-color, #fff);
+      border-radius: var(--radius); padding: 24px 20px 16px; text-align: center;
+      transform: scale(0.9); transition: transform 0.2s;
+    }
+    .confirm-overlay.show .confirm-dialog { transform: scale(1); }
+    .confirm-dialog p { font-size: 15px; margin-bottom: 20px; line-height: 1.4; }
+    .confirm-dialog .actions { display: flex; gap: 8px; }
+    .confirm-dialog .actions button {
+      flex: 1; padding: 12px; border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .btn-danger { background: #ff3b30; color: #fff; }
+
+    /* ── Empty ── */
+    .empty {
+      text-align: center; padding: 48px 20px;
+      color: var(--tg-theme-hint-color, #999);
+    }
+    .empty-icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-text { font-size: 15px; line-height: 1.5; }
+
+    /* ── Skeleton ── */
+    .skeleton {
+      background: linear-gradient(90deg,
+        var(--tg-theme-secondary-bg-color, #eee) 25%,
+        var(--tg-theme-bg-color, #f5f5f5) 50%,
+        var(--tg-theme-secondary-bg-color, #eee) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: var(--radius);
+    }
+    @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    .skeleton-card { height: 80px; margin-bottom: var(--gap); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: var(--tg-theme-text-color, #333);
+      color: var(--tg-theme-bg-color, #fff);
+      padding: 10px 20px; border-radius: 20px;
+      font-size: 14px; font-weight: 500;
+      opacity: 0; transition: all 0.3s; z-index: 400; pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('positions')">📦 Позиции</button>
+    <button class="tab" onclick="switchTab('channels')">📡 Каналы</button>
+    <button class="tab" onclick="switchTab('stats')">📊 Аналитика</button>
+  </div>
+
+  <div class="content">
+    <div class="panel active" id="panel-positions">
+      <div class="summary" id="pos-summary"></div>
+      <div id="pos-list">
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+    </div>
+    <div class="panel" id="panel-channels">
+      <div id="ch-summary"></div>
+      <div id="ch-list">
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+    </div>
+    <div class="panel" id="panel-stats">
+      <div class="stats-date">
+        <button onclick="changeDate(-1)">‹</button>
+        <span class="date-text" id="stats-date-label"></span>
+        <button onclick="changeDate(1)">›</button>
+      </div>
+      <div id="stats-content">
+        <div class="skeleton skeleton-card"></div>
+      </div>
+    </div>
+  </div>
+
+  <button class="fab" id="fab" onclick="openAdd()">+</button>
+
+  <div class="modal-overlay" id="addOverlay">
+    <div class="modal">
+      <h3>Добавить позиции</h3>
+      <textarea id="addInput" placeholder="Samsung S25 FE 256GB, 45000&#10;iPhone 16 Pro 256GB — 109.000"></textarea>
+      <div class="hint">Каждая позиция с новой строки. Цена через запятую или тире.</div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeAdd()">Отмена</button>
+        <button class="btn-submit" id="addBtn" onclick="submitAdd()" disabled>Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-dialog">
+      <p id="confirmText"></p>
+      <div class="actions">
+        <button class="btn-cancel" onclick="closeConfirm()">Отмена</button>
+        <button class="btn-danger" onclick="doConfirm()">Удалить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+try { tg.headerColor = tg.themeParams.bg_color; } catch(e) {}
+
+const API = '/api';
+let data = { positions: [], channels: [] };
+let statsCache = {};
+let statsDate = new Date();
+let confirmCb = null;
+
+/* ── tabs ── */
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) =>
+    t.classList.toggle('active', ['positions','channels','stats'][i] === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  document.getElementById('fab').classList.toggle('hidden', name !== 'positions');
+  if (name === 'stats') loadStats();
+  haptic('selection');
+}
+
+/* ── load ── */
+async function loadData() {
+  try {
+    const r = await fetch(API + '/data');
+    if (!r.ok) throw r;
+    data = await r.json();
+    renderPositions();
+    renderChannels();
+  } catch(e) { console.error(e); }
+}
+
+async function loadStats() {
+  const ds = fmtDate(statsDate);
+  document.getElementById('stats-date-label').textContent = fmtDateRu(statsDate);
+  try {
+    const r = await fetch(API + '/stats?date=' + ds);
+    if (!r.ok) throw r;
+    statsCache = await r.json();
+    renderStats();
+  } catch(e) { console.error(e); }
+}
+
+/* ── render positions ── */
+function renderPositions() {
+  const el = document.getElementById('pos-list');
+  const sum = document.getElementById('pos-summary');
+  const active = data.positions.filter(p => p.on !== false).length;
+  const total = data.positions.length;
+
+  sum.innerHTML = `
+    <div class="summary-card accent"><div class="value">${total}</div><div class="label">Всего</div></div>
+    <div class="summary-card"><div class="value">${active}</div><div class="label">Активных</div></div>
+    <div class="summary-card"><div class="value">${total - active}</div><div class="label">На паузе</div></div>`;
+
+  if (!total) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📦</div><div class="empty-text">Позиций пока нет<br>Нажми + чтобы добавить</div></div>';
+    return;
+  }
+
+  el.innerHTML = data.positions.map((p, i) => {
+    const kw = esc(p.kw.join(', '));
+    const on = p.on !== false;
+    const pr = p.pr ? fmtPrice(p.pr) + '₽' : '';
+    return `<div class="card ${on ? '' : 'paused'}" id="c${i}">
+      <div class="card-header">
+        <div class="card-title">${kw}</div>
+        <label class="toggle"><input type="checkbox" ${on ? 'checked' : ''} onchange="toggle(${i})"><span class="slider"></span></label>
+      </div>
+      <div class="card-meta">
+        ${pr ? `<span class="price-badge">${pr}</span>` : '<span class="no-price">Без цены</span>'}
+        <button class="btn-delete" onclick="del(${i})">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── render channels ── */
+function renderChannels() {
+  const el = document.getElementById('ch-list');
+  const sum = document.getElementById('ch-summary');
+  sum.innerHTML = `<div class="summary" style="margin-bottom:12px">
+    <div class="summary-card accent"><div class="value">${data.channels.length}</div><div class="label">Каналов</div></div></div>`;
+  if (!data.channels.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📡</div><div class="empty-text">Каналы не добавлены<br>Отправь ID канала боту</div></div>';
+    return;
+  }
+  el.innerHTML = data.channels.map((ch, i) =>
+    `<div class="card"><div class="channel-card">
+      <div class="channel-icon">📡</div>
+      <div class="channel-info">
+        <div class="channel-name">Канал ${i + 1}</div>
+        <div class="channel-id">${ch}</div>
+      </div>
+    </div></div>`).join('');
+}
+
+/* ── render stats ── */
+function renderStats() {
+  const el = document.getElementById('stats-content');
+  const channels = statsCache.channels || {};
+  const names = statsCache.position_names || {};
+  if (!Object.keys(channels).length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Нет данных за этот день</div></div>';
+    return;
+  }
+  let total = 0;
+  let html = '';
+  for (const [chId, positions] of Object.entries(channels)) {
+    let chTotal = 0;
+    let rows = '';
+    const sorted = Object.entries(positions).sort((a,b) => b[1] - a[1]);
+    for (const [ph, cnt] of sorted) {
+      chTotal += cnt; total += cnt;
+      rows += `<div class="stats-row"><span class="stats-pos-name">${esc(names[ph] || ph)}</span><span class="stats-count">${cnt}</span></div>`;
+    }
+    html += `<div class="stats-channel">
+      <div class="stats-channel-header">Канал ${chId} · ${chTotal} запр.</div>${rows}</div>`;
+  }
+  el.innerHTML = `<div class="summary" style="margin-bottom:14px">
+    <div class="summary-card accent"><div class="value">${total}</div><div class="label">Запросов за день</div></div></div>${html}`;
+}
+
+/* ── actions ── */
+async function toggle(i) {
+  haptic('light');
+  const p = data.positions[i];
+  try {
+    await fetch(API + '/toggle', { method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({index: i})});
+    p.on = !(p.on !== false);
+    renderPositions();
+    toast(p.on !== false ? 'Активирована' : 'На паузе');
+  } catch(e) { console.error(e); }
+}
+
+function del(i) {
+  haptic('medium');
+  const p = data.positions[i];
+  confirmCb = async () => {
+    const card = document.getElementById('c' + i);
+    if (card) card.classList.add('removing');
+    try {
+      await fetch(API + '/delete', { method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({index: i})});
+      haptic('success');
+      toast('Удалено');
+      await loadData();
+    } catch(e) { console.error(e); }
+  };
+  document.getElementById('confirmText').textContent = `Удалить «${p.kw.join(', ')}»?`;
+  document.getElementById('confirmOverlay').classList.add('show');
+}
+
+function doConfirm() { closeConfirm(); if (confirmCb) { confirmCb(); confirmCb = null; } }
+function closeConfirm() { document.getElementById('confirmOverlay').classList.remove('show'); }
+
+/* ── add modal ── */
+function openAdd() {
+  document.getElementById('addOverlay').classList.add('show');
+  const inp = document.getElementById('addInput');
+  inp.value = ''; document.getElementById('addBtn').disabled = true;
+  setTimeout(() => inp.focus(), 300);
+}
+function closeAdd() { document.getElementById('addOverlay').classList.remove('show'); }
+
+document.getElementById('addInput').addEventListener('input', e => {
+  document.getElementById('addBtn').disabled = !e.target.value.trim();
+});
+
+async function submitAdd() {
+  const text = document.getElementById('addInput').value.trim();
+  if (!text) return;
+  document.getElementById('addBtn').disabled = true;
+  try {
+    const r = await fetch(API + '/add', { method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text})});
+    const res = await r.json();
+    closeAdd(); haptic('success');
+    toast(res.added ? `Добавлено: ${res.added}` : 'Нет новых позиций');
+    await loadData();
+  } catch(e) {
+    console.error(e);
+    document.getElementById('addBtn').disabled = false;
+  }
+}
+
+/* ── date nav ── */
+function changeDate(d) {
+  statsDate.setDate(statsDate.getDate() + d);
+  const now = new Date(); now.setHours(23,59,59,999);
+  if (statsDate > now) statsDate = new Date();
+  loadStats();
+}
+
+/* ── helpers ── */
+function fmtDate(d) { return d.toISOString().split('T')[0]; }
+function fmtDateRu(d) {
+  const m = ['января','февраля','марта','апреля','мая','июня',
+             'июля','августа','сентября','октября','ноября','декабря'];
+  return `${d.getDate()} ${m[d.getMonth()]}`;
+}
+function fmtPrice(p) { return Number(p).toLocaleString('ru-RU'); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function haptic(type) {
+  try {
+    if (type === 'selection') tg.HapticFeedback.selectionChanged();
+    else if (type === 'success') tg.HapticFeedback.notificationOccurred('success');
+    else tg.HapticFeedback.impactOccurred(type);
+  } catch(e) {}
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+document.getElementById('addOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeAdd(); });
+document.getElementById('confirmOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeConfirm(); });
+
+loadData();
+setInterval(loadData, 30000);
+</script>
+</body>
+</html>

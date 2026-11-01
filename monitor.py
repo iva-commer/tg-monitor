@@ -23,9 +23,10 @@ import sys
 from datetime import timezone, timedelta
 from pathlib import Path
 
+from aiohttp import web as aio_web
 from dotenv import load_dotenv
 from telethon import TelegramClient, Button, events
-from telethon.tl.types import User
+from telethon.tl.types import User, ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButtonWebView
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -39,6 +40,9 @@ API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+WEBAPP_URL = os.getenv("WEBAPP_URL", "")
+WEBAPP_DIR = Path(__file__).parent / "webapp"
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_FILE = DATA_DIR / "data.json"
@@ -296,6 +300,110 @@ async def detect_topics(client, group_id: int) -> dict:
     except Exception as e:
         log.error("Ошибка сканирования топиков: %s", e)
     return topics
+
+
+# ── web API ───────────────────────────────────────────────────────────────
+
+async def _api_data(request):
+    d = load_data()
+    return aio_web.json_response({
+        "positions": d.get("positions", []),
+        "channels": d.get("channels", []),
+    })
+
+
+async def _api_stats(request):
+    from datetime import datetime
+    date = request.query.get("date", "")
+    if not date:
+        MSK = timezone(timedelta(hours=3))
+        date = datetime.now(MSK).strftime("%Y-%m-%d")
+    stats = load_stats()
+    day = stats.get(date, {})
+    d = load_data()
+    names = {}
+    for pos in d["positions"]:
+        if isinstance(pos, dict):
+            names[pos_hash(pos["kw"])] = ", ".join(pos["kw"])
+    return aio_web.json_response({
+        "date": date,
+        "channels": day,
+        "position_names": names,
+    })
+
+
+async def _api_toggle(request):
+    body = await request.json()
+    idx = body.get("index", -1)
+    d = load_data()
+    if 0 <= idx < len(d["positions"]):
+        pos = d["positions"][idx]
+        pos["on"] = not pos.get("on", True)
+        save_data(d)
+    return aio_web.json_response({"ok": True})
+
+
+async def _api_delete(request):
+    body = await request.json()
+    idx = body.get("index", -1)
+    d = load_data()
+    if 0 <= idx < len(d["positions"]):
+        d["positions"].pop(idx)
+        save_data(d)
+    return aio_web.json_response({"ok": True})
+
+
+async def _api_add(request):
+    body = await request.json()
+    text = body.get("text", "")
+    d = load_data()
+    added = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        keywords = [k.strip() for k in line.split(",") if k.strip()]
+        keywords = [k for k in keywords if k not in ('—', '–', '-')]
+        if not keywords:
+            continue
+        price = ""
+        if keywords:
+            last = keywords[-1].lstrip('—–- ').strip()
+            if re.fullmatch(r'\d[\d\s.]*', last):
+                price = last.replace(" ", "").replace(".", "")
+                keywords.pop()
+        if not price and len(keywords) == 1:
+            m_pr = re.search(r'\s+[—–\-]?\s*(\d[\d.\s]*\d|\d{4,})$', keywords[0])
+            if m_pr:
+                price = m_pr.group(1).replace(" ", "").replace(".", "")
+                keywords[0] = keywords[0][:m_pr.start()]
+        if not keywords or not keywords[0]:
+            continue
+        norm_new = [norm(k) for k in keywords]
+        if any([norm(k) for k in p["kw"]] == norm_new for p in d["positions"]):
+            continue
+        d["positions"].append({"kw": keywords, "pr": price, "on": True})
+        added += 1
+    if added:
+        save_data(d)
+    return aio_web.json_response({"added": added})
+
+
+async def _webapp_index(request):
+    return aio_web.FileResponse(WEBAPP_DIR / "index.html")
+
+
+def _setup_web_app():
+    app = aio_web.Application()
+    app.router.add_get('/api/data', _api_data)
+    app.router.add_get('/api/stats', _api_stats)
+    app.router.add_post('/api/toggle', _api_toggle)
+    app.router.add_post('/api/delete', _api_delete)
+    app.router.add_post('/api/add', _api_add)
+    app.router.add_get('/', _webapp_index)
+    app.router.add_get('/app', _webapp_index)
+    app.router.add_get('/app/', _webapp_index)
+    return app
 
 
 # ── основной цикл ─────────────────────────────────────────────────────────
@@ -873,6 +981,23 @@ async def main():
                 return
         await event.answer("Позиция не найдена")
 
+    # ── команда /app ─────────────────────────────────────────────────────
+
+    @bot.on(events.NewMessage(pattern="/app", from_users=ADMIN_ID))
+    async def cmd_app(event):
+        if not WEBAPP_URL:
+            await event.respond("WEBAPP_URL не настроен в .env")
+            return
+        url = WEBAPP_URL.rstrip("/") + "/app/"
+        markup = ReplyKeyboardMarkup(
+            rows=[KeyboardButtonRow(buttons=[
+                KeyboardButtonWebView(text="\U0001f4f1 Панель управления", url=url)
+            ])],
+            resize=True,
+            single_use=True,
+        )
+        await event.respond("Нажми кнопку ниже:", buttons=markup)
+
     # ── мониторинг каналов (юзербот) ──────────────────────────────────────
 
     @user.on(events.NewMessage)
@@ -988,6 +1113,15 @@ async def main():
             )
         except Exception:
             log.exception("Ошибка отправки уведомления")
+
+    # ── веб-сервер ─────────────────────────────────────────────────────────
+
+    web_app = _setup_web_app()
+    runner = aio_web.AppRunner(web_app)
+    await runner.setup()
+    site = aio_web.TCPSite(runner, '127.0.0.1', 8082)
+    await site.start()
+    log.info("Web-сервер запущен на порту 8082")
 
     # ── старт ─────────────────────────────────────────────────────────────
 
