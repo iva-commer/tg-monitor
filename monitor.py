@@ -4,8 +4,9 @@
 
 Управление через форум-группу с топиками:
   📥 Запросы — уведомления о совпадениях
-  📡 Каналы — каналы для мониторинга (отправляй @канал или ссылку)
+  📡 Каналы — ID каналов для мониторинга
   📦 Позиции — позиции для поиска (ключевые слова через запятую)
+  🏷 Теги — ответы бота (подтверждения, ошибки, списки)
 
 Настройка: добавь бота в группу админом и отправь /setup
 """
@@ -50,6 +51,7 @@ cfg = {
     "topic_requests": 0,
     "topic_channels": 0,
     "topic_positions": 0,
+    "topic_tags": 0,
 }
 
 
@@ -119,6 +121,8 @@ async def detect_topics(client, group_id: int) -> dict:
                 topics["requests"] = msg.id
             elif "канал" in name:
                 topics["channels"] = msg.id
+            elif "тег" in name:
+                topics["tags"] = msg.id
             elif "позиц" in name:
                 topics["positions"] = msg.id
     except Exception as e:
@@ -148,22 +152,25 @@ async def main():
         cfg["topic_requests"] = saved.get("topic_requests", 0)
         cfg["topic_channels"] = saved.get("topic_channels", 0)
         cfg["topic_positions"] = saved.get("topic_positions", 0)
+        cfg["topic_tags"] = saved.get("topic_tags", 0)
 
         # Если топики не сохранены — автодетект
         if not all([cfg["topic_requests"], cfg["topic_channels"],
-                    cfg["topic_positions"]]):
+                    cfg["topic_positions"], cfg["topic_tags"]]):
             topics = await detect_topics(bot, group_id)
             if not topics:
                 topics = await detect_topics(user, group_id)
             cfg["topic_requests"] = cfg["topic_requests"] or topics.get("requests", 0)
             cfg["topic_channels"] = cfg["topic_channels"] or topics.get("channels", 0)
             cfg["topic_positions"] = cfg["topic_positions"] or topics.get("positions", 0)
+            cfg["topic_tags"] = cfg["topic_tags"] or topics.get("tags", 0)
 
         if all([cfg["topic_requests"], cfg["topic_channels"],
-                cfg["topic_positions"]]):
-            log.info("Группа: %d | Запросы: %d | Каналы: %d | Позиции: %d",
+                cfg["topic_positions"], cfg["topic_tags"]]):
+            log.info("Группа: %d | Запросы: %d | Каналы: %d | Позиции: %d | Теги: %d",
                      cfg["group_id"], cfg["topic_requests"],
-                     cfg["topic_channels"], cfg["topic_positions"])
+                     cfg["topic_channels"], cfg["topic_positions"],
+                     cfg["topic_tags"])
         else:
             log.warning("Не все топики найдены. Отправь /setup в группе.")
 
@@ -177,7 +184,8 @@ async def main():
                 "Отправь в каждом топике:\n"
                 "/setup запросы — в топике для уведомлений\n"
                 "/setup каналы — в топике для каналов\n"
-                "/setup позиции — в топике для позиций"
+                "/setup позиции — в топике для позиций\n"
+                "/setup теги — в топике для ответов бота"
             )
             return
 
@@ -191,26 +199,29 @@ async def main():
             if not topics:
                 topics = await detect_topics(user, gid)
 
-            if all(k in topics for k in ("requests", "channels", "positions")):
+            if all(k in topics for k in ("requests", "channels", "positions", "tags")):
                 cfg["group_id"] = gid
                 cfg["topic_requests"] = topics["requests"]
                 cfg["topic_channels"] = topics["channels"]
                 cfg["topic_positions"] = topics["positions"]
+                cfg["topic_tags"] = topics["tags"]
                 save_config({
                     "group_id": gid,
                     "topic_requests": topics["requests"],
                     "topic_channels": topics["channels"],
                     "topic_positions": topics["positions"],
+                    "topic_tags": topics["tags"],
                 })
                 await event.reply(
                     f"✅ Автонастройка!\n\n"
                     f"📥 Запросы → {topics['requests']}\n"
                     f"📡 Каналы → {topics['channels']}\n"
-                    f"📦 Позиции → {topics['positions']}"
+                    f"📦 Позиции → {topics['positions']}\n"
+                    f"🏷 Теги → {topics['tags']}"
                 )
-                log.info("Auto-setup: group=%d r=%d c=%d p=%d",
+                log.info("Auto-setup: group=%d r=%d c=%d p=%d t=%d",
                          gid, topics["requests"], topics["channels"],
-                         topics["positions"])
+                         topics["positions"], topics["tags"])
                 return
 
             await event.reply(
@@ -218,7 +229,8 @@ async def main():
                 "Отправь в каждом топике:\n"
                 "/setup запросы\n"
                 "/setup каналы\n"
-                "/setup позиции"
+                "/setup позиции\n"
+                "/setup теги"
             )
             return
 
@@ -238,12 +250,16 @@ async def main():
         elif "позиц" in arg:
             cfg["topic_positions"] = tid
             await event.reply("✅ Топик «Позиции» настроен")
+        elif "тег" in arg:
+            cfg["topic_tags"] = tid
+            await event.reply("✅ Топик «Теги» настроен")
         else:
             await event.reply(
                 "Укажи тип:\n"
                 "/setup запросы\n"
                 "/setup каналы\n"
-                "/setup позиции"
+                "/setup позиции\n"
+                "/setup теги"
             )
             return
 
@@ -252,14 +268,15 @@ async def main():
             "topic_requests": cfg["topic_requests"],
             "topic_channels": cfg["topic_channels"],
             "topic_positions": cfg["topic_positions"],
+            "topic_tags": cfg["topic_tags"],
         })
 
         if all([cfg["topic_requests"], cfg["topic_channels"],
-                cfg["topic_positions"]]):
+                cfg["topic_positions"], cfg["topic_tags"]]):
             await event.reply("🎉 Все топики настроены! Бот готов к работе.")
-            log.info("Manual setup done: group=%d r=%d c=%d p=%d",
+            log.info("Manual setup done: group=%d r=%d c=%d p=%d t=%d",
                      gid, cfg["topic_requests"], cfg["topic_channels"],
-                     cfg["topic_positions"])
+                     cfg["topic_positions"], cfg["topic_tags"])
 
     # ── /start в личке ────────────────────────────────────────────────────
 
@@ -296,12 +313,20 @@ async def main():
         if not text or text.startswith("/setup"):
             return
 
+        tags = cfg["topic_tags"]
+
+        async def to_tags(text, **kw):
+            if tags:
+                await bot.send_message(cfg["group_id"], text, reply_to=tags, **kw)
+            else:
+                await event.reply(text, **kw)
+
         # ── топик «Каналы» ─────────────────────────────────────────────
         if tid == cfg["topic_channels"]:
             if text.lower() == "/list":
                 data = load_data()
                 if not data["channels"]:
-                    await event.reply("Пусто. Отправь ID канала (число).")
+                    await to_tags("Пусто. Отправь ID канала (число).")
                     return
                 lines = []
                 for ch_id in data["channels"]:
@@ -311,7 +336,7 @@ async def main():
                         lines.append(f"• {title} ({ch_id})")
                     except Exception:
                         lines.append(f"• {ch_id}")
-                await event.reply("📡 Каналы:\n" + "\n".join(lines))
+                await to_tags("📡 Каналы:\n" + "\n".join(lines))
                 return
 
             if text.lower() == "/clear":
@@ -319,7 +344,7 @@ async def main():
                 cnt = len(data["channels"])
                 data["channels"] = []
                 save_data(data)
-                await event.reply(f"Удалено каналов: {cnt}")
+                await to_tags(f"Удалено каналов: {cnt}")
                 return
 
             for line in text.splitlines():
@@ -327,29 +352,27 @@ async def main():
                 if not line or line.startswith("/"):
                     continue
 
-                # Извлечь числовой ID
                 digits = re.sub(r"[^\d]", "", line)
                 if not digits:
-                    await event.reply(f"❌ Не число: {line}")
+                    await to_tags(f"❌ Не число: {line}")
                     continue
                 ch_id = int(digits)
 
                 data = load_data()
                 if ch_id in data["channels"]:
-                    await event.reply(f"⚠️ Уже есть: {ch_id}")
+                    await to_tags(f"⚠️ Уже есть: {ch_id}")
                     continue
 
                 data["channels"].append(ch_id)
                 save_data(data)
 
-                # Попробовать получить название
                 try:
                     entity = await user.get_entity(ch_id)
                     ch_title = getattr(entity, "title", str(ch_id))
                 except Exception:
                     ch_title = str(ch_id)
 
-                await event.reply(
+                await to_tags(
                     f"✅ {ch_title} ({ch_id})",
                     buttons=[Button.inline(
                         "❌ Убрать", data=f"rc{ch_id}".encode(),
@@ -361,13 +384,13 @@ async def main():
             if text.lower() == "/list":
                 data = load_data()
                 if not data["positions"]:
-                    await event.reply("Пусто. Отправь ключевые слова через запятую.")
+                    await to_tags("Пусто. Отправь ключевые слова через запятую.")
                     return
                 lines = [
                     f"{i + 1}. {', '.join(p)}"
                     for i, p in enumerate(data["positions"])
                 ]
-                await event.reply("📋 Позиции:\n" + "\n".join(lines))
+                await to_tags("📋 Позиции:\n" + "\n".join(lines))
                 return
 
             if text.lower() == "/clear":
@@ -375,7 +398,7 @@ async def main():
                 cnt = len(data["positions"])
                 data["positions"] = []
                 save_data(data)
-                await event.reply(f"Удалено позиций: {cnt}")
+                await to_tags(f"Удалено позиций: {cnt}")
                 return
 
             added = 0
@@ -390,7 +413,7 @@ async def main():
                 data = load_data()
                 norm_new = [norm(k) for k in keywords]
                 if any([norm(k) for k in p] == norm_new for p in data["positions"]):
-                    await event.reply(f"⚠️ Уже есть: {', '.join(keywords)}")
+                    await to_tags(f"⚠️ Уже есть: {', '.join(keywords)}")
                     continue
 
                 data["positions"].append(keywords)
@@ -398,7 +421,7 @@ async def main():
                 added += 1
 
                 ph = pos_hash(keywords)
-                await event.reply(
+                await to_tags(
                     f"✅ {', '.join(keywords)}",
                     buttons=[Button.inline(
                         "❌ Убрать", data=f"rp{ph}".encode(),
@@ -407,7 +430,7 @@ async def main():
 
             if added:
                 data = load_data()
-                await event.reply(f"Всего позиций: {len(data['positions'])}")
+                await to_tags(f"Всего позиций: {len(data['positions'])}")
 
     # ── файлы с позициями ─────────────────────────────────────────────────
 
@@ -465,7 +488,12 @@ async def main():
                     added += 1
 
         save_data(data)
-        await event.reply(f"✅ Загружено: {added}\nВсего: {len(data['positions'])}")
+        tags = cfg["topic_tags"]
+        msg = f"✅ Загружено: {added}\nВсего: {len(data['positions'])}"
+        if tags:
+            await bot.send_message(cfg["group_id"], msg, reply_to=tags)
+        else:
+            await event.reply(msg)
 
     # ── кнопки удаления ───────────────────────────────────────────────────
 
