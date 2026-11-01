@@ -583,6 +583,11 @@ async def main():
             f"Добавь бота в группу и отправь /setup"
         )
 
+    # ── DEBUG: catch-all ────────────────────────────────────────────────
+    @bot.on(events.NewMessage)
+    async def debug_all(event):
+        log.info(f"[DEBUG] BOT got msg: chat_id={event.chat_id} sender={event.sender_id} is_group={event.is_group} text={repr((event.text or '')[:80])}")
+
     # ── сообщения в группе ────────────────────────────────────────────────
 
     @bot.on(events.NewMessage(func=lambda e: e.is_group and e.sender_id == ADMIN_ID))
