@@ -152,24 +152,34 @@ def _color_in_text(keyword_normed: str, text_normed: str) -> bool:
     return False
 
 
+_COLOR_PREFIXES = {
+    'jet', 'ice', 'midnight', 'space', 'sierra', 'desert', 'natural',
+    'starlight', 'deep', 'dark', 'light', 'pale', 'bright', 'neon',
+    'royal', 'product',
+}
+
+
 def _split_position(keywords: list) -> list:
     result = []
     for kw in keywords:
         kw = kw.strip()
         if not kw:
             continue
-        if ',' in kw or len(kw.split()) <= 3:
+        words = kw.split()
+        if len(words) == 1:
             result.append(kw)
-        else:
-            words = kw.split()
-            i = 0
-            while i < len(words):
-                if i + 1 < len(words) and norm(words[i + 1]) in _COLOR_LOOKUP:
-                    result.append(f"{words[i]} {words[i + 1]}")
-                    i += 2
-                else:
-                    result.append(words[i])
-                    i += 1
+            continue
+        i = 0
+        while i < len(words):
+            nw = norm(words[i])
+            if (i + 1 < len(words)
+                    and norm(words[i + 1]) in _COLOR_LOOKUP
+                    and (nw in _COLOR_PREFIXES or nw in _COLOR_LOOKUP)):
+                result.append(f"{words[i]} {words[i + 1]}")
+                i += 2
+            else:
+                result.append(words[i])
+                i += 1
     return result
 
 
