@@ -209,9 +209,18 @@ def _split_position(keywords: list) -> list:
     return result
 
 
+def _flexi_pattern(token: str) -> str:
+    parts = re.split(r'(\d+)', token)
+    return r'\s*'.join(re.escape(p) for p in parts if p)
+
+
+def _word_match(token: str, text: str) -> bool:
+    pat = _flexi_pattern(token)
+    return bool(re.search(r'\b' + pat + r'\b', text))
+
+
 def match_positions(text: str, positions: list) -> list:
     n = norm(text)
-    n_ns = n.replace(' ', '')
     matched = []
     for pos in positions:
         if isinstance(pos, dict):
@@ -228,17 +237,15 @@ def match_positions(text: str, positions: list) -> list:
             nkw = norm(kw)
             if nkw in _SOFT_UNITS:
                 continue
-            nkw_ns = nkw.replace(' ', '')
-            if nkw in n or nkw_ns in n_ns:
+            if _word_match(nkw, n):
                 continue
-            no_z = nkw_ns.lstrip('z')
-            if no_z != nkw_ns and no_z and (no_z in n_ns or no_z in n):
+            no_z = nkw.replace(' ', '').lstrip('z')
+            if no_z != nkw.replace(' ', '') and no_z and _word_match(no_z, n):
                 continue
             stripped = _UNIT_TAIL.sub('', nkw)
-            if stripped and stripped != nkw:
-                if stripped in n or stripped in n_ns:
-                    continue
-            if len(nkw.split()) <= 3 and _color_in_text(nkw, n):
+            if stripped and stripped != nkw and _word_match(stripped, n):
+                continue
+            if _color_in_text(nkw, n):
                 continue
             ok = False
             break
