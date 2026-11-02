@@ -1000,6 +1000,79 @@ async def main():
 
     # ── мониторинг каналов (юзербот) ──────────────────────────────────────
 
+    DEDUP_DELAY = 15
+    _pending: dict = {}
+
+    async def _flush_pending(key):
+        await asyncio.sleep(DEDUP_DELAY)
+        entry = _pending.pop(key, None)
+        if not entry:
+            return
+
+        channels_info = entry["channels"]
+        buyer_line = entry["buyer_line"]
+        buyer_url = entry["buyer_url"]
+        matched = entry["matched"]
+        display = entry["display"]
+        qty = entry["qty"]
+
+        if len(channels_info) == 1:
+            ch_title, msg_link, msg_time = channels_info[0]
+            channels_text = (
+                f"Канал: {ch_title}\n\n"
+                f"Ссылка: {msg_link}  🕐 {msg_time}"
+            )
+        else:
+            lines = []
+            for ch_title, msg_link, msg_time in channels_info:
+                lines.append(f"• {ch_title} 🕐 {msg_time}\n  {msg_link}")
+            channels_text = (
+                f"Каналы ({len(channels_info)}):\n" + "\n".join(lines)
+            )
+
+        copy_lines = []
+        for m in matched:
+            kw = m["kw"] if isinstance(m, dict) else m
+            price = m.get("pr", "") if isinstance(m, dict) else ""
+            parts = [", ".join(kw)]
+            if price:
+                parts.append(f"{price}₽")
+            if qty:
+                parts.append(f"{qty} шт")
+            copy_lines.append(" — ".join(parts))
+        pos_str = "```\n" + "\n".join(copy_lines) + "\n```"
+
+        notification = (
+            f"📢 Совпадение!\n\n"
+            f"{channels_text}\n\n"
+            f"Покупатель: {buyer_line}\n\n"
+            f"Сообщение:\n{display}\n\n"
+            f"Позиция:\n{pos_str}"
+        )
+
+        buttons = []
+        if buyer_url:
+            buttons.append([Button.url("💬 Чат", buyer_url)])
+        for m in matched:
+            if isinstance(m, dict):
+                ph = pos_hash(m["kw"])
+                buttons.append([Button.inline(
+                    f"⏸ Стоп: {', '.join(m['kw'])[:30]}",
+                    data=f"stop{ph}".encode(),
+                )])
+
+        try:
+            await bot.send_message(
+                cfg["group_id"],
+                notification,
+                reply_to=cfg["topic_requests"],
+                buttons=buttons or None,
+                link_preview=False,
+                parse_mode="md",
+            )
+        except Exception:
+            log.exception("Ошибка отправки уведомления")
+
     @user.on(events.NewMessage)
     async def on_channel_message(event):
         if not event.is_channel and not event.is_group:
@@ -1038,7 +1111,9 @@ async def main():
 
         sender = await event.get_sender()
         buyer_url = None
+        sender_id = 0
         if isinstance(sender, User):
+            sender_id = sender.id
             name = (
                 f"{sender.first_name or ''} {sender.last_name or ''}".strip()
                 or "—"
@@ -1068,51 +1143,30 @@ async def main():
         if qty_match:
             qty = qty_match.group(1) or qty_match.group(2) or qty_match.group(3)
 
-        copy_lines = []
-        for m in matched:
-            kw = m["kw"] if isinstance(m, dict) else m
-            price = m.get("pr", "") if isinstance(m, dict) else ""
-            parts = [', '.join(kw)]
-            if price:
-                parts.append(f"{price}₽")
-            if qty:
-                parts.append(f"{qty} шт")
-            copy_lines.append(" — ".join(parts))
-        pos_str = "```\n" + "\n".join(copy_lines) + "\n```"
-
         display = msg_text[:800] + ("..." if len(msg_text) > 800 else "")
 
-        notification = (
-            f"📢 Совпадение!\n\n"
-            f"Канал: {ch_title}\n\n"
-            f"Ссылка: {msg_link}  🕐 {msg_time}\n\n"
-            f"Покупатель: {buyer_line}\n\n"
-            f"Сообщение:\n{display}\n\n"
-            f"Позиция:\n{pos_str}"
-        )
+        pos_key = tuple(sorted(
+            pos_hash(m["kw"]) for m in matched if isinstance(m, dict)
+        ))
+        key = (sender_id, pos_key)
 
-        buttons = []
-        if buyer_url:
-            buttons.append([Button.url("💬 Чат", buyer_url)])
-        for m in matched:
-            if isinstance(m, dict):
-                ph = pos_hash(m["kw"])
-                buttons.append([Button.inline(
-                    f"⏸ Стоп: {', '.join(m['kw'])[:30]}",
-                    data=f"stop{ph}".encode(),
-                )])
-
-        try:
-            await bot.send_message(
-                cfg["group_id"],
-                notification,
-                reply_to=cfg["topic_requests"],
-                buttons=buttons or None,
-                link_preview=False,
-                parse_mode="md",
-            )
-        except Exception:
-            log.exception("Ошибка отправки уведомления")
+        if key in _pending:
+            _pending[key]["channels"].append((ch_title, msg_link, msg_time))
+            if len(msg_text) > len(_pending[key]["raw_text"]):
+                _pending[key]["display"] = display
+                _pending[key]["raw_text"] = msg_text
+            log.info("Дедупликация: %s из %s добавлен к pending", buyer_line.split('\n')[0], ch_title)
+        else:
+            _pending[key] = {
+                "channels": [(ch_title, msg_link, msg_time)],
+                "buyer_line": buyer_line,
+                "buyer_url": buyer_url,
+                "matched": matched,
+                "display": display,
+                "qty": qty,
+                "raw_text": msg_text,
+            }
+            asyncio.create_task(_flush_pending(key))
 
     # ── веб-сервер ─────────────────────────────────────────────────────────
 
