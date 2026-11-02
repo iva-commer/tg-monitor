@@ -225,8 +225,34 @@ def _word_match(token: str, text: str) -> bool:
     return bool(re.search(r'\b' + pat + r'\b', text))
 
 
+def _kw_in_segment(keywords: list, seg: str) -> bool:
+    for kw in keywords:
+        nkw = norm(kw)
+        if nkw in _SOFT_UNITS:
+            continue
+        if _word_match(nkw, seg):
+            continue
+        no_z = nkw.replace(' ', '').lstrip('z')
+        if no_z != nkw.replace(' ', '') and no_z and _word_match(no_z, seg):
+            continue
+        stripped = _UNIT_TAIL.sub('', nkw)
+        if stripped and stripped != nkw and _word_match(stripped, seg):
+            continue
+        if _color_in_text(nkw, seg):
+            continue
+        return False
+    kw_norms = {norm(kw) for kw in keywords}
+    msg_words = set(seg.split())
+    for mod in _MODEL_MODIFIERS:
+        if mod in msg_words and mod not in kw_norms:
+            return False
+    return True
+
+
 def match_positions(text: str, positions: list) -> list:
-    n = norm(text)
+    segments = [norm(line) for line in text.split('\n') if line.strip()]
+    if not segments:
+        return []
     matched = []
     for pos in positions:
         if isinstance(pos, dict):
@@ -238,31 +264,7 @@ def match_positions(text: str, positions: list) -> list:
         keywords = _split_position(raw)
         if not keywords:
             continue
-        ok = True
-        for kw in keywords:
-            nkw = norm(kw)
-            if nkw in _SOFT_UNITS:
-                continue
-            if _word_match(nkw, n):
-                continue
-            no_z = nkw.replace(' ', '').lstrip('z')
-            if no_z != nkw.replace(' ', '') and no_z and _word_match(no_z, n):
-                continue
-            stripped = _UNIT_TAIL.sub('', nkw)
-            if stripped and stripped != nkw and _word_match(stripped, n):
-                continue
-            if _color_in_text(nkw, n):
-                continue
-            ok = False
-            break
-        if ok:
-            kw_norms = {norm(kw) for kw in keywords}
-            msg_words = set(n.split())
-            for mod in _MODEL_MODIFIERS:
-                if mod in msg_words and mod not in kw_norms:
-                    ok = False
-                    break
-        if ok:
+        if any(_kw_in_segment(keywords, seg) for seg in segments):
             matched.append(pos)
     return matched
 
